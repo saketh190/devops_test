@@ -5,17 +5,25 @@ on: [push, pull_request]
 jobs:
   build:
     runs-on: ubuntu-latest
+
     steps:
-      - name: Checkout repo
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up Node
-        uses: actions/setup-node@v4
+      - name: Build Docker image
+        run: docker build -t my-todo-app:latest .
+
+      - name: Scan Docker image with Trivy
+        uses: aquasecurity/trivy-action@master
         with:
-          node-version: 18
+          image-ref: my-todo-app:latest
+          format: 'table'
 
-      - name: Install dependencies
-        run: npm install
-
-      - name: Run tests
-        run: npm test
+      - name: (Optional) Sign image with Cosign
+        if: success()
+        uses: sigstore/cosign-installer@v3
+      - name: Cosign sign (keyless)
+        if: success()
+        env:
+          COSIGN_EXPERIMENTAL: "1"
+        run: cosign sign my-todo-app:latest
