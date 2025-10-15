@@ -1,41 +1,60 @@
-name: Secure CI Pipeline
+name: Secure CI/CD Demo
 
 on:
   push:
-    branches:
-      - main
-  pull_request:
+    branches: [ main ]
+
+permissions:
+  contents: read
+  id-token: write
+  packages: write
 
 jobs:
-  build:
+  build_scan_sign:
     runs-on: ubuntu-latest
+
     steps:
-      - name: Set up job
-        run: echo "Starting Secure CI pipeline..."
-
       - name: Checkout repository
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
+      # Build image locally
       - name: Build Docker image
-        run: docker build -t my-todo-app:latest .
+        run: docker build -t local-secure-demo:latest .
 
+      # Scan the locally built image
       - name: Scan Docker image with Trivy
         uses: aquasecurity/trivy-action@master
         with:
-          image-ref: my-todo-app:latest
+          image-ref: local-secure-demo:latest
           format: table
-          exit-code: 0
-          ignore-unfixed: true
+          exit-code: '0'
+          severity: 'HIGH,CRITICAL'
 
-      # ❌ Disabled Cosign signing step (for demo)
-      # - name: (Optional) Sign image with Cosign
-      #   run: cosign sign my-todo-app:latest
+      # Optional: Push image to Docker Hub
+      - name: Log in to Docker Hub
+        if: env.DOCKER_USERNAME != '' && env.DOCKER_PASSWORD != ''
+        env:
+          DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
+          DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
+        run: echo "$DOCKER_PASSWORD" | docker login -u "$DOCKER_USERNAME" --password-stdin
 
-      - name: Post Scan Docker image with Trivy
-        run: echo "Docker image scan complete."
+      - name: Tag and push image to Docker Hub
+        if: env.DOCKER_USERNAME != '' && env.DOCKER_PASSWORD != ''
+        env:
+          DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
+        run: |
+          docker tag local-secure-demo:latest "$DOCKER_USERNAME/secure-demo:latest"
+          docker push "$DOCKER_USERNAME/secure-demo:latest"
 
-      - name: Post Checkout repository
-        run: echo "Repository checkout complete."
+      - name: Install Cosign
+        run: |
+          curl -sSL -o cosign https://github.com/sigstore/cosign/releases/latest/download/cosign-linux-amd64
+          chmod +x cosign
+          sudo mv cosign /usr/local/bin/
 
-      - name: Complete job
-        run: echo "CI pipeline finished successfully!"
+      - name: Sign image with Cosign (keyless)
+        if: env.DOCKER_USERNAME != '' && env.DOCKER_PASSWORD != ''
+        env:
+          COSIGN_EXPERIMENTAL: "true"
+          DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
+        run: cosign sign --yes "$DOCKER_USERNAME/secure-demo:latest"
